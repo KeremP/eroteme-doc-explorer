@@ -42,7 +42,7 @@ REDIS_DB   = 0
 
 class CustomFAISS(FAISS):
     def __init__(self, *args, **kwargs):
-        super(CustomFAISS).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
     
     @staticmethod
     def decode_cached_embeddings(cache_result):
@@ -61,6 +61,10 @@ class CustomFAISS(FAISS):
         precomputed_embeddings = redis.get(doc_hash)
         if precomputed_embeddings is None:
             embeddings = embedding.embed_documents(texts)
+            try:
+                redis.set(doc_hash, json.dumps(embeddings))
+            except Exception as e:
+                print(f"Unable to cache embeddings in Redis: {e}")
         else:
             embeddings = CustomFAISS.decode_cached_embeddings(precomputed_embeddings)
 
@@ -112,10 +116,16 @@ def init_redis(host: str, port: int, db: int, username: Optional[str] = None, pa
     else:
         raise Exception("Unable to connect to Redis server")
 
+def hash_doc(arxiv_id):
+    return hashlib.md5(
+        bytes(arxiv_id, 'utf-8')
+    ).hexdigest()
+
 @timer_func
-def build_docstore(context, metadata):
+def build_docstore(context, metadata, doc_hash, redis):
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_KEY)
-    docsearch = FAISS.from_texts(context, embeddings, metadatas=metadata)
+    # docsearch = FAISS.from_texts(context, embeddings, metadatas=metadata)
+    docsearch = CustomFAISS.from_precomputed(embeddings, context, metadatas=metadata, redis=redis, doc_hash=doc_hash)
     return docsearch
  
 @timer_func
@@ -143,6 +153,7 @@ def lambda_handler(event, context):
     query = event.get('query')
 
     id_tex_map = {}
+    doc_hashes = []
     for id in action:
        clean_id = get_gzip_source_files(id)
        files = os.listdir(os.path.join("./temp", clean_id))
@@ -150,11 +161,14 @@ def lambda_handler(event, context):
        tex_path_dir = os.path.join("./temp",clean_id,tex_path)
        parsed_tex = parse_tex(tex_path_dir)
        id_tex_map.update({clean_id:parsed_tex})
+       doc_hashes.append(
+        hash_doc(id)
+       )
 
     context, context_map, metadata = build_context(id_tex_map[list(id_tex_map.keys())[0]])
     
     # pp.pprint(context_map)
-    docstore = build_docstore(context, metadata)
+    docstore = build_docstore(context, metadata, doc_hashes[0], REDIS_CLIENT)
     
     chain = VectorDBQAWithSourcesChain.from_llm(OpenAI(temperature=0), vectorstore=docstore)
     result = chain({
