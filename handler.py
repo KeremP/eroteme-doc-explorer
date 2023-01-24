@@ -40,6 +40,8 @@ REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = os.getenv("REDIS_PORT")
 REDIS_DB   = 0
 
+USE_REDIS = bool(int(os.getenv("USE_REDIS")))
+
 class CustomFAISS(FAISS):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -58,11 +60,14 @@ class CustomFAISS(FAISS):
                 "Please it install it with `pip install faiss` "
                 "or `pip install faiss-cpu` (depending on Python version)."
             )
-        precomputed_embeddings = redis.get(doc_hash)
+        precomputed_embeddings = None
+        if redis is not None:
+            precomputed_embeddings = redis.get(doc_hash)
         if precomputed_embeddings is None:
             embeddings = embedding.embed_documents(texts)
             try:
-                redis.set(doc_hash, json.dumps(embeddings))
+                if redis is not None:
+                    redis.set(doc_hash, json.dumps(embeddings))
             except Exception as e:
                 print(f"Unable to cache embeddings in Redis: {e}")
         else:
@@ -146,7 +151,10 @@ def build_context(parsed_tex: dict):
 
 
 def lambda_handler(event, context):
-    REDIS_CLIENT: redis.Redis = init_redis(REDIS_HOST, REDIS_PORT, REDIS_DB)
+    if USE_REDIS:
+        REDIS_CLIENT: redis.Redis = init_redis(REDIS_HOST, REDIS_PORT, REDIS_DB)
+    else:
+        REDIS_CLIENT = None
 
     result = None
     action = event.get('ids')
