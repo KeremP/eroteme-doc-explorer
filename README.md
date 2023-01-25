@@ -2,7 +2,7 @@
 Microservice for using chained LLM calls and document embeddings to explore sets of documents.
 
 ## TODO:
-- reduce latency -> build_docstore() runtime now down to < 0.5s (~.3s)
+- reduce latency -> build_docstore() runtime now down to < 0.5s (~.3s) w/ Redis caching
 - ~~cache embeddings of split docs~~
     - ~~use as key Arxiv ID and store array of b64 str representations of embeddings~~
 - test with mulitple documents
