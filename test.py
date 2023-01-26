@@ -3,9 +3,9 @@ from handler import lambda_handler
 
 if __name__ == "__main__":
     EVENT = {
-        "ids":["0704.0001"],
+        "ids":["0704.0001","2104.06821"],
         "query":"What is the higgs-boson?"
     }
 
     resp = lambda_handler(EVENT, None)
-    print(resp['result'])
+    print(resp['answer'], resp['sources'])

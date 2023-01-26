@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import arxiv
 
 def extract_sections(text):
     drop_sections = re.split(r'\\section\*{.*?}', text, re.S)
@@ -16,15 +17,28 @@ def get_sections(tex):
     results = re.findall(r'\\section{(.*?)}', tex)
     return results
 
-def map_sections(sections, parsed_tex):
-    mapped = {sections[i]:parsed_tex[i] for i in range(len(sections))}
+def get_paper_title(ids):
+    results = arxiv.Search(
+        id_list=ids
+    )
+    titles = [res.title for res in results.results()]
+    title_dict = dict(zip(ids,titles))
+    return title_dict
+
+def map_sections(sections, parsed_tex, title, arxiv_id):
+    mapped = {
+            sections[i]:
+            {
+                "content":parsed_tex[i], "title":title, "arxiv_id": arxiv_id
+            } for i in range(len(sections))
+        }
     return mapped
 
-def parse_tex(path: str):
+def parse_tex(path: str, paper_title: str, arxiv_id: str):
     tex = load_tex(path)
     res, raw = extract_sections(tex)
     sections = get_sections(raw)
-    mapped_sections = map_sections(sections, res)
+    mapped_sections = map_sections(sections, res, paper_title, arxiv_id)
     return mapped_sections
 
 def remove_latex(input_str:str):

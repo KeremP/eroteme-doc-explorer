@@ -4,10 +4,10 @@ import uuid
 import json
 import tarfile
 import subprocess
-from typing import Optional, Union
+from typing import Optional, Union, List
 from dotenv import load_dotenv
 import logging
-from doc_utils import parse_tex, remove_latex
+from doc_utils import parse_tex, remove_latex, get_paper_title
 from decorators import timer_func
 import pprint
 
@@ -22,7 +22,7 @@ from redis import UsernamePasswordCredentialProvider
 import numpy as np
 
 import hashlib
-
+import faiss
 import openai
 from langchain import OpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -52,39 +52,34 @@ class CustomFAISS(FAISS):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-    
+
     @staticmethod
     def decode_cached_embeddings(cache_result):
         return json.loads(cache_result)
 
     @classmethod
-    def from_precomputed(cls, embedding, texts, metadatas, redis: redis.Redis, doc_hash, **kwargs) -> FAISS:
-        try:
-            import faiss
-        except:
-            raise ValueError(
-                "Could not import faiss python package. "
-                "Please it install it with `pip install faiss` "
-                "or `pip install faiss-cpu` (depending on Python version)."
-            )
-        precomputed_embeddings = None
-        if redis is not None:
-            precomputed_embeddings = redis.get(doc_hash)
-        if precomputed_embeddings is None:
-            embeddings = embedding.embed_documents(texts)
-            try:
+    def from_precomputed(cls, embedding, texts: list, metadatas: List[dict], dims: int, redis: redis.Redis, doc_hash: str, **kwargs) -> FAISS:
+        embeddings = []
+        docs = []
+        for i in range(len(doc_hash)):
+            hash = doc_hash[i]
+            embed_text = texts[i]
+            metadata = metadatas[i]
+            if redis.exists(hash) == 0 or redis is None:
+                tmp = embedding.embed_documents(embed_text)
+                embeddings+=tmp
                 if redis is not None:
-                    redis.set(doc_hash, json.dumps(embeddings))
-            except Exception as e:
-                logger.warning(f"Unable to cache embeddings in Redis: {e}")
-        else:
-            embeddings = CustomFAISS.decode_cached_embeddings(precomputed_embeddings)
+                    try:
+                        redis.set(hash, json.dumps(tmp))
+                    except Exception as e:
+                        logger.warning(f"Unable to cache embeddings in Redis: {e}")
+            else:
+                cached_embedding = redis.get(hash)
+                embeddings+=CustomFAISS.decode_cached_embeddings(cached_embedding)
+            docs += [Document(page_content=text, metadata=metadata[i]) for i,text in enumerate(embed_text)]
 
-        index = faiss.IndexFlatL2(len(embeddings[0]))
+        index = faiss.IndexFlatL2(dims)
         index.add(np.array(embeddings, dtype=np.float32))
-        docs = [
-            Document(page_content=text, metadata=metadatas[i]) for i,text in enumerate(texts)
-        ]
         index_to_id = {i: str(uuid.uuid4()) for i in range(len(docs))}
         docstore = InMemoryDocstore(
             {index_to_id[i]: doc for i, doc in enumerate(docs)}
@@ -160,9 +155,9 @@ def hash_doc(arxiv_id):
     ).hexdigest()
 
 @timer_func
-def build_docstore(context, metadata, doc_hash, redis):
+def build_docstore(context, metadata, doc_hash, redis, dims=1536):
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_KEY)
-    docsearch = CustomFAISS.from_precomputed(embeddings, context, metadatas=metadata, redis=redis, doc_hash=doc_hash)
+    docsearch = CustomFAISS.from_precomputed(embeddings, context, metadatas=metadata, dims=dims, redis=redis, doc_hash=doc_hash)
     return docsearch
  
 @timer_func
@@ -172,10 +167,12 @@ def build_context(parsed_tex: dict):
     context_map = {}
     for k,v in parsed_tex.items():
         temp_ctx = text_splitter.split_text(
-            v
+            v['content']
         )
         context_map.update({
-            i+len(context):(k, temp_ctx[i]) for i in range(len(temp_ctx))
+            i+len(context):{
+                "section":k, "content":temp_ctx[i], "title":v['title'], "id":v['arxiv_id']
+            } for i in range(len(temp_ctx))
         })
         context+=temp_ctx
     metadata = [{'source':f'{context_map[i]}'} for i in context_map.keys()]
@@ -200,27 +197,48 @@ def lambda_handler(event, context):
 
     id_tex_map = {}
     doc_hashes = []
+    paper_titles = get_paper_title(action)
+
+    contexts = []
+    metadatas = []
+    metadata_cache = {
+
+    }
+
     for id in action:
+        title = paper_titles[id]
         clean_id = get_gzip_source_files(id, parent_path)
         files = os.listdir(os.path.join(parent_path, clean_id))
         tex_path = [f for f in files if ".tex" in f][0]
         tex_path_dir = os.path.join(parent_path,clean_id,tex_path)
-        parsed_tex = parse_tex(tex_path_dir)
+        parsed_tex = parse_tex(tex_path_dir, title, id)
         id_tex_map.update({clean_id:parsed_tex})
         doc_hashes.append(
             hash_doc(id)
         )
+        context, context_map, metadata = build_context(parsed_tex)
+        contexts.append(context)
+        metadata_cache.update({id:metadata})
+        metadatas.append([{"source":f"{id}:{i}"} for i in range(len(metadata))])
 
-    context, context_map, metadata = build_context(id_tex_map[list(id_tex_map.keys())[0]])
+    docstore = build_docstore(contexts, metadatas, doc_hashes, REDIS_CLIENT)
     
-    docstore = build_docstore(context, metadata, doc_hashes[0], REDIS_CLIENT)
-    
-    chain = VectorDBQAWithSourcesChain.from_llm(OpenAI(temperature=0), vectorstore=docstore)
+    chain = VectorDBQAWithSourcesChain.from_chain_type(OpenAI(temperature=0), chain_type="map_reduce", vectorstore=docstore)
     result = chain({
         "question":query
     }, return_only_outputs=True)
 
-    resp = {'result':result}
+    answer = result['answer']
+    raw_source = result['sources'].split(",")
+    if len(raw_source) > 1:
+
+        sources = [
+            metadata_cache[rs.split(":")[0].strip()][int(rs.split(":")[1].strip())] for rs in raw_source
+        ]
+    else:
+        raw_source = raw_source[0].split(":")
+        sources = metadata_cache[raw_source[0].strip()][int(raw_source[1].strip())]
+    resp = {'answer':answer, "sources":sources}
 
     return resp
 
