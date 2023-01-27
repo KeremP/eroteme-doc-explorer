@@ -175,7 +175,7 @@ def build_context(parsed_tex: dict):
             } for i in range(len(temp_ctx))
         })
         context+=temp_ctx
-    metadata = [{'source':f'{context_map[i]}'} for i in context_map.keys()]
+    metadata = [{'source':context_map[i]} for i in context_map.keys()]
     return context, context_map, metadata
 
 
@@ -237,7 +237,7 @@ def lambda_handler(event, context):
         ]
     else:
         raw_source = raw_source[0].split(":")
-        sources = metadata_cache[raw_source[0].strip()][int(raw_source[1].strip())]
+        sources = [metadata_cache[raw_source[0].strip()][int(raw_source[1].strip())]]
     resp = {'answer':answer, "sources":sources}
 
     return resp
