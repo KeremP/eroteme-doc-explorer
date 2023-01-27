@@ -29,8 +29,10 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
 from langchain.chains import VectorDBQAWithSourcesChain
+from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain.docstore.document import Document
 from langchain.docstore.in_memory import InMemoryDocstore
+from langchain.prompts import PromptTemplate
 
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
@@ -223,10 +225,15 @@ def lambda_handler(event, context):
 
     docstore = build_docstore(contexts, metadatas, doc_hashes, REDIS_CLIENT)
     
-    chain = VectorDBQAWithSourcesChain.from_chain_type(OpenAI(temperature=0), chain_type="map_reduce", vectorstore=docstore)
+    chain = VectorDBQAWithSourcesChain.from_chain_type(
+        OpenAI(temperature=0),
+        chain_type="map_reduce",
+        vectorstore=docstore, 
+        )
     result = chain({
         "question":query
     }, return_only_outputs=True)
+
 
     answer = result['answer']
     raw_source = result['sources'].split(",")

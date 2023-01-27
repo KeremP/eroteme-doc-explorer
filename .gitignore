@@ -3,3 +3,4 @@ temp
 *.zip
 package
 deploy
+test_opt.py
