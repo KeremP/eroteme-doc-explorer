@@ -1,9 +1,7 @@
 import os
-import sys
 import uuid
 import json
 import tarfile
-import subprocess
 from typing import Optional, Union, List
 from dotenv import load_dotenv
 import logging
@@ -24,16 +22,13 @@ import numpy as np
 import hashlib
 import faiss
 import openai
-from langchain import OpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
-from langchain.chains import VectorDBQAWithSourcesChain
-from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain.docstore.document import Document
 from langchain.docstore.in_memory import InMemoryDocstore
-from langchain.prompts import PromptTemplate
 
+# OPENAI CONFIG
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
 
@@ -41,11 +36,14 @@ openai.api_key = OPENAI_KEY
 REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = os.getenv("REDIS_PORT")
 REDIS_DB   = 0
-
 USE_REDIS = bool(int(os.getenv("USE_REDIS")))
 
-DEBUG = bool(int(os.getenv("DEBUG")))
+# HUGGINGFACE CONFIG
+HF_API_TOKEN = os.getenv("HF_API_KEY")
+HF_ENDPOINT = os.getenv("HF_ENDPOINT")
 
+# DEBUG MODE
+DEBUG = bool(int(os.getenv("DEBUG")))
 
 class CustomFAISS(FAISS):
     """
@@ -193,7 +191,6 @@ def lambda_handler(event, context):
     if DEBUG: parent_path = "./temp"
     else: parent_path = "/tmp/"
 
-    result = None
     action = event.get('ids')
     query = event.get('query')
 
@@ -224,29 +221,44 @@ def lambda_handler(event, context):
         metadatas.append([{"source":f"{id}:{i}"} for i in range(len(metadata))])
 
     docstore = build_docstore(contexts, metadatas, doc_hashes, REDIS_CLIENT)
+
+    similar_sections = docstore.similarity_search_with_score(
+        query
+    )
+
+    _prompt = [
+        "*"+doc[0].page_content for doc in similar_sections
+    ]
+
+    p_context = "\n".join(_prompt)
+    prompt = f"""Answer the question as truthfully as possible using the provided context, and if the answer is not contained within the text below, say "I cannot answer."
     
-    chain = VectorDBQAWithSourcesChain.from_chain_type(
-        OpenAI(temperature=0),
-        chain_type="map_reduce",
-        vectorstore=docstore, 
-        )
-    result = chain({
-        "question":query
-    }, return_only_outputs=True)
+    Context:
+
+    {p_context}
+
+    Q:{query}
+    A:
+    """
+
+    response = openai.Completion.create(
+        model="text-curie-001",
+        prompt=prompt,
+        temperature=0,
+        max_tokens=500,
+    )
+    answer = response.choices[0].text
 
 
-    answer = result['answer']
-    raw_source = result['sources'].split(",")
-    if len(raw_source) > 1:
+    meta_keys = [
+        doc[0].metadata['source'].split(":") for doc in similar_sections
+    ]
 
-        sources = [
-            metadata_cache[rs.split(":")[0].strip()][int(rs.split(":")[1].strip())] for rs in raw_source
-        ]
-    else:
-        raw_source = raw_source[0].split(":")
-        sources = [metadata_cache[raw_source[0].strip()][int(raw_source[1].strip())]]
-    resp = {'answer':answer, "sources":sources}
+    sources = [
+        metadata_cache[k[0]][int(k[1])] for k in meta_keys
+    ]
 
+    resp = {'answer':answer, 'sources':sources}
     return resp
 
 
