@@ -241,13 +241,14 @@ def lambda_handler(event, context):
     A:
     """
 
-    response = openai.Completion.create(
-        model="text-curie-001",
-        prompt=prompt,
-        temperature=0,
-        max_tokens=500,
-    )
-    answer = response.choices[0].text
+    # This should be handled by the app's backend to use token streaming
+    # response = openai.Completion.create(
+    #     model="text-curie-001",
+    #     prompt=prompt,
+    #     temperature=0,
+    #     max_tokens=500,
+    # )
+    # answer = response.choices[0].text
 
 
     meta_keys = [
@@ -258,7 +259,7 @@ def lambda_handler(event, context):
         metadata_cache[k[0]][int(k[1])] for k in meta_keys
     ]
 
-    resp = {'answer':answer, 'sources':sources}
+    resp = {'prompt':prompt, 'sources':sources}
     return resp
 
 

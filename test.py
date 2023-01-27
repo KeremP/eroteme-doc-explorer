@@ -8,4 +8,4 @@ if __name__ == "__main__":
     }
 
     resp = lambda_handler(EVENT, None)
-    print(resp['answer'], resp['sources'])
+    print(resp['prompt'], resp['sources'])
