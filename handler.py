@@ -5,7 +5,7 @@ import tarfile
 from typing import Optional, Union, List
 from dotenv import load_dotenv
 import logging
-from doc_utils import parse_tex, remove_latex, get_paper_title
+from doc_utils import parse_tex, remove_latex, get_paper_title, load_bib
 from decorators import timer_func
 import pprint
 
@@ -204,13 +204,18 @@ def lambda_handler(event, context):
 
     }
 
+    figures = {}
+    sections = {}
+
     for id in action:
         title = paper_titles[id]
         clean_id = get_gzip_source_files(id, parent_path)
         files = os.listdir(os.path.join(parent_path, clean_id))
         tex_path = [f for f in files if ".tex" in f][0]
         tex_path_dir = os.path.join(parent_path,clean_id,tex_path)
-        parsed_tex = parse_tex(tex_path_dir, title, id)
+        parsed_tex, fig_dict, section_map = parse_tex(tex_path_dir, title, id)
+        # TODO: implement this
+        # bib = load_bib()
         id_tex_map.update({clean_id:parsed_tex})
         doc_hashes.append(
             hash_doc(id)
@@ -219,6 +224,8 @@ def lambda_handler(event, context):
         contexts.append(context)
         metadata_cache.update({id:metadata})
         metadatas.append([{"source":f"{id}:{i}"} for i in range(len(metadata))])
+        figures.update({id:fig_dict})
+        sections.update({id:section_map})
 
     docstore = build_docstore(contexts, metadatas, doc_hashes, REDIS_CLIENT)
 
@@ -241,16 +248,6 @@ def lambda_handler(event, context):
     A:
     """
 
-    # This should be handled by the app's backend to use token streaming
-    # response = openai.Completion.create(
-    #     model="text-curie-001",
-    #     prompt=prompt,
-    #     temperature=0,
-    #     max_tokens=500,
-    # )
-    # answer = response.choices[0].text
-
-
     meta_keys = [
         doc[0].metadata['source'].split(":") for doc in similar_sections
     ]
@@ -259,7 +256,13 @@ def lambda_handler(event, context):
         metadata_cache[k[0]][int(k[1])] for k in meta_keys
     ]
 
-    resp = {'prompt':prompt, 'sources':sources}
+    resp = {
+        'prompt':prompt,
+        'sources':sources,
+        'figures':figures,
+        'sections':sections
+        }
+
     return resp
 
 
