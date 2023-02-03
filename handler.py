@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import json
 import tarfile
@@ -171,7 +172,7 @@ def build_context(parsed_tex: dict):
         )
         context_map.update({
             i+len(context):{
-                "section":k, "content":temp_ctx[i], "title":v['title'], "id":v['arxiv_id']
+                "section":re.sub(r'\\label\{.*?\}?', '', k), "content":temp_ctx[i], "title":v['title'], "id":v['arxiv_id']
             } for i in range(len(temp_ctx))
         })
         context+=temp_ctx
@@ -233,20 +234,10 @@ def lambda_handler(event, context):
         query
     )
 
-    _prompt = [
-        "*"+doc[0].page_content for doc in similar_sections
+
+    results = [
+        doc[0].page_content for doc in similar_sections
     ]
-
-    p_context = "\n".join(_prompt)
-    prompt = f"""Answer the question as truthfully as possible using the provided context, and if the answer is not contained within the text below, say "I cannot answer."
-    
-    Context:
-
-    {p_context}
-
-    Q:{query}
-    A:
-    """
 
     meta_keys = [
         doc[0].metadata['source'].split(":") for doc in similar_sections
@@ -257,7 +248,7 @@ def lambda_handler(event, context):
     ]
 
     resp = {
-        'prompt':prompt,
+        'results':results,
         'sources':sources,
         'figures':figures,
         'sections':sections
@@ -265,5 +256,8 @@ def lambda_handler(event, context):
 
     return resp
 
+    # TODO: return full sections for user to preview
+    # TODO: figure searching -> embed figures and pull figures similar to query
+    #       - integrate `section` and `figures` response values into frontend
 
     

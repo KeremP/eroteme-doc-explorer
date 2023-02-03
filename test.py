@@ -11,7 +11,7 @@ if __name__ == "__main__":
     pp = PrettyPrinter(indent=4)
 
     resp = lambda_handler(EVENT, None)
-    print(resp['prompt'], resp['sources'])
+    print(resp['results'], resp['sources'])
 
     pp.pprint(resp['figures'])
     pp.pprint(resp['sections'])
