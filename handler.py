@@ -115,7 +115,11 @@ def get_gzip_source_files(arxiv_id: str, parent_path: str):
     """
     base_url = "https://arxiv.org/e-print/"
     target = base_url+arxiv_id
-    joined_id = "".join(arxiv_id.split("."))
+    split_id = arxiv_id.split(".")
+    if len(split_id) == 1:
+        split_id = arxiv_id.split("/")    
+    joined_id = "".join(split_id)
+
 
     filename = parent_path + joined_id + ".tar.gz"
     http = urllib3.PoolManager()
@@ -189,7 +193,7 @@ def lambda_handler(event, context):
     else:
         REDIS_CLIENT = None
 
-    if DEBUG: parent_path = "./temp"
+    if DEBUG: parent_path = "./temp/"
     else: parent_path = "/tmp/"
 
     action = event.get('ids')
