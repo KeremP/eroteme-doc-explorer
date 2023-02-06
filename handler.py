@@ -214,7 +214,11 @@ def lambda_handler(event, context):
 
     for id in action:
         title = paper_titles[id]
-        clean_id = get_gzip_source_files(id, parent_path)
+        try:
+            clean_id = get_gzip_source_files(id, parent_path)
+        except Exception as e:
+            logger.warn(f"Unable to download or extract {id}: {e}")
+            continue
         files = os.listdir(os.path.join(parent_path, clean_id))
         tex_path = [f for f in files if ".tex" in f][0]
         tex_path_dir = os.path.join(parent_path,clean_id,tex_path)
